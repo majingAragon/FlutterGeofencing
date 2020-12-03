@@ -6,6 +6,10 @@
 
 #import <CoreLocation/CoreLocation.h>
 
+#import "GeolocationHandler.h"
+#import "PermissionHandler.h"
+#import "ErrorCodes.h"
+
 @implementation GeofencingPlugin {
   CLLocationManager *_locationManager;
   FlutterEngine *_headlessRunner;
@@ -15,6 +19,7 @@
   NSUserDefaults *_persistentState;
   NSMutableArray *_eventQueue;
   int64_t _onLocationUpdateHandle;
+  PermissionHandler *_permissionHandler;
 }
 
 static const NSString *kRegionKey = @"region";
@@ -69,8 +74,9 @@ static BOOL backgroundIsolateRun = NO;
     result(@([self removeGeofence:arguments]));
   } else if ([@"GeofencingPlugin.getRegisteredGeofenceIds" isEqualToString:call.method]) {
       result([self getMonitoredRegionIds:arguments]);
-  }
-  else {
+  }else if([@"GeofencingPlugin.getCurrentPostionIsInRegion" isEqualToString:call.method]){
+      [self getCurrentPostionIsInRegion:arguments result:result];
+  }else {
     result(FlutterMethodNotImplemented);
   }
 }
@@ -124,7 +130,10 @@ static BOOL backgroundIsolateRun = NO;
 #pragma mark GeofencingPlugin Methods
 
 - (void)sendLocationEvent:(CLRegion *)region eventType:(int)event {
-  NSAssert([region isKindOfClass:[CLCircularRegion class]], @"region must be CLCircularRegion");
+//  NSAssert([region isKindOfClass:[CLCircularRegion class]], @"region must be CLCircularRegion");
+    if(![region isKindOfClass:[CLCircularRegion class]]){
+        return;
+    }
   CLLocationCoordinate2D center = region.center;
   int64_t handle = [self getCallbackHandleForRegionId:region.identifier];
   if (handle != 0 && _callbackChannel != nil) {
@@ -196,6 +205,59 @@ static BOOL backgroundIsolateRun = NO;
   
   [self setCallbackHandleForRegionId:callbackHandle regionId:identifier];
   [self->_locationManager startMonitoringForRegion:region];
+}
+
+-(void)getCurrentPostionIsInRegion:(NSArray *)arguments result:(FlutterResult)result{
+    NSString *identifier = arguments[0];
+    double latitude = [arguments[1] doubleValue];
+    double longitude = [arguments[2] doubleValue];
+    double radius = [arguments[3] doubleValue];
+    
+    CLCircularRegion *region =
+        [[CLCircularRegion alloc] initWithCenter:CLLocationCoordinate2DMake(latitude, longitude)
+                                          radius:radius
+                              
+                                      identifier:identifier];
+    
+    if(_permissionHandler == nil){
+        _permissionHandler = [[PermissionHandler alloc]init];
+    }
+
+[_permissionHandler
+ requestPermission:^(CLAuthorizationStatus status) {
+    if (status != kCLAuthorizationStatusAuthorizedWhenInUse && status != kCLAuthorizationStatusAuthorizedAlways) {
+        result([FlutterError errorWithCode: GeolocatorErrorPermissionDenied
+                                   message: @"User denied permissions to access the device's location."
+                                   details:nil]);
+        return;
+    }
+    
+    GeolocationHandler *geolocationHandler = [[GeolocationHandler alloc] init];
+    
+    [geolocationHandler startListeningWithDesiredAccuracy:kCLLocationAccuracyBest
+                                           distanceFilter:kCLDistanceFilterNone
+                                            resultHandler:^(CLLocation *location) {
+        [geolocationHandler stopListening];
+        
+        CLLocationCoordinate2D coordinate = location.coordinate;
+        BOOL isContain = [region containsCoordinate:coordinate];
+        result(@(isContain));
+    }
+                                             errorHandler:^(NSString *errorCode, NSString *errorDescription){
+        [geolocationHandler stopListening];
+        
+        result([FlutterError errorWithCode: errorCode
+                                   message: errorDescription
+                                   details: nil]);
+    }];
+}
+ errorHandler:^(NSString *errorCode, NSString *errorDescription) {
+    result([FlutterError errorWithCode: errorCode
+                               message: errorDescription
+                               details: nil]);
+}];
+
+
 }
 
 - (BOOL)removeGeofence:(NSArray *)arguments {

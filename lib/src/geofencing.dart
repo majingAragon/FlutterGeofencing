@@ -161,4 +161,10 @@ class GeofencingManager {
   /// geofence region.
   static Future<bool> removeGeofenceById(String id) async => await _channel
       .invokeMethod('GeofencingPlugin.removeGeofence', <dynamic>[id]);
+
+  static Future<bool> getCurrentPostionIsInRegion(
+          String id, double latitude, double longitude, double radius) async =>
+      await _channel.invokeMethod(
+          'GeofencingPlugin.getCurrentPostionIsInRegion',
+          <dynamic>[id, latitude, longitude, radius]);
 }
